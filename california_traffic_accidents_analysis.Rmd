@@ -1,0 +1,215 @@
+---
+title: "Alcohol Traffic Collisions and Fatalities in California"
+output:
+  html_document:
+    theme: flatly
+date: "2024-03-25"
+thanks: https://samielsabri.shinyapps.io/alcohol_traffic_fatalities/
+---
+
+
+In this codebook, I will be investigating traffic accident fatalities in the US state of California.  you'll be investigating traffic accident fatalities. The data source is the Statewide Integrated Traffic Records System (SWITRS) provided as a sqlite database holding data on every traffic incident in California from 2020 and 2021. The data dictionary is available here: https://tims.berkeley.edu/help/SWITRS.php
+
+To reproduce this analysis, please install the following dependencies.
+
+```{R, echo=FALSE, message=FALSE}
+library(DBI)
+library(RSQLite)
+library(tidyverse)
+library(ggplot2)
+library(shiny)
+library(readr)
+library(plotly)
+library(leaflet)
+library(sf)
+
+```
+
+## Data Analysis
+
+
+
+- The `collisions` and `parties` table are linked on `case_id`. A single collision can have multiple parties, but each party is only involved in a single collision.
+- For a given party in a collision, the vehicle make is stored in the `vehicle_make` column.
+- The date of the collision is stored in the `collision_date` column of the `collisions` table.
+- The `vehicle_make` column is very messy, but for the purpose of this exercise, I am not cleaning the entries (i.e. mapping "HOND" to "HONDA"). Parties with a NULL `vehicle_make` will not be considered.
+
+1. To start, as a curious exercise and get familiar with the dataset: What are the top 5 vehicle makes that are involved in collisions on weekends?
+
+```{R}
+# Create local copy as backup
+backup_db_path <- "./backupswitrs.sqlite"
+
+# Connect to the original database
+mydb <- dbConnect(RSQLite::SQLite(), "./switrs.sqlite")
+
+unique <- dbGetQuery(mydb,
+                     "SELECT DISTINCT road_condition_1 FROM collisions;")
+```
+
+```{R}
+# Based on the SQLite Documentation (https://www.sqlite.org/lang_datefunc.html), the following strftime() function with the %u substitution, returns the day of the week 1-7 with Monday==1 for any given date.
+
+collision_day_column_exists_query <- "
+SELECT COUNT(*) AS column_exists 
+FROM pragma_table_info('collisions') 
+WHERE name = 'collision_day';
+"
+
+collision_day_column_exists <- dbGetQuery(mydb, collision_day_column_exists_query)$column_exists > 0
+
+if (!collision_day_column_exists) {
+  query_add_column <- "ALTER TABLE collisions ADD COLUMN collision_day TEXT;"
+  dbExecute(mydb, query_add_column)
+}
+
+# Update the column with the day of the week
+query_update_column <- "
+UPDATE collisions
+SET collision_day = strftime('%u', collision_date);
+"
+dbExecute(mydb, query_update_column)
+
+severe_or_fatal_column_exists_query <- "
+SELECT COUNT(*) AS column_exists 
+FROM pragma_table_info('collisions') 
+WHERE name = 'severe_or_fatal';
+"
+
+severe_or_fatal_column_exists <- dbGetQuery(mydb, severe_or_fatal_column_exists_query)$column_exists > 0
+
+if (!severe_or_fatal_column_exists) {
+  query_add_column <- "ALTER TABLE collisions ADD COLUMN severe_or_fatal INT;"
+  dbExecute(mydb, query_add_column)
+}
+
+# Update the column with severe or fatal
+query_update_column <- "
+UPDATE collisions
+SET severe_or_fatal = 
+    CASE 
+        WHEN collision_severity IN ('fatal', 'severe injury') THEN 1
+        ELSE 0
+    END;
+"
+dbExecute(mydb, query_update_column)
+
+top_5_vehicles <- dbGetQuery(mydb,
+  "SELECT p.vehicle_make, COUNT(*) AS collision_count
+  FROM collisions c
+  JOIN parties p ON c.case_id = p.case_id
+  WHERE collision_day IN ('6', '7') AND p.vehicle_make IS NOT NULL
+  GROUP BY p.vehicle_make
+  ORDER BY collision_count DESC
+  LIMIT 5
+  "
+)
+top_5_vehicles
+```
+
+2. What is the relationship between alcohol and collisions involving fatalities vs. no fatalities? 
+
+### Step 1: Fetch relevant data from SQLite database
+```{R}
+alcohol_fatality_data <- dbGetQuery(mydb, 
+  "SELECT 
+    alcohol_involved, 
+    collision_day, 
+    latitude, 
+    longitude, 
+    CASE WHEN collision_severity = 'fatal' THEN 1 ELSE 0 END AS fatal 
+  FROM collisions
+  WHERE latitude BETWEEN 32 AND 42 
+    AND longitude BETWEEN -124 AND -114
+    AND latitude IS NOT NULL 
+    AND longitude IS NOT NULL
+  ")
+
+
+```
+
+
+### Step 2: Prepare and Clean Data
+```{R}
+alcohol_fatality_data$collision_day <- as.factor(alcohol_fatality_data$collision_day)
+
+alcohol_fatality_data$alcohol_involved[is.na(alcohol_fatality_data$alcohol_involved)] <- 0
+
+
+
+fatal_collisions_by_alcohol <- alcohol_fatality_data %>% filter(fatal==1) %>% group_by(alcohol_involved) %>% summarize(fatal_count=n())
+
+total_collisions_by_alcohol <- alcohol_fatality_data %>%
+  group_by(alcohol_involved) %>%
+  summarize(total_count = n())
+
+percentage_fatal_collisions <- total_collisions_by_alcohol %>%
+  left_join(fatal_collisions_by_alcohol, by = "alcohol_involved") %>%
+  mutate(fatality_rate = (fatal_count / total_count)) %>%
+  select(alcohol_involved, total_count, fatal_count, fatality_rate)
+
+write_csv(alcohol_fatality_data, "alcohol_traffic_fatalities/alcohol_fatality_data.csv")
+
+
+
+
+```
+
+### Step 3: Model Data
+```{R, message=FALSE}
+
+# model1 <- glm(fatal ~ alcohol_involved, 
+#              data = alcohol_fatality_data, 
+#              family = "binomial")
+# 
+# model1_summary <- summary(model1)
+# 
+# model1_OR <- exp(cbind(OR = coef(model1), confint(model1)))
+# 
+# model2 <- glm(fatal ~ alcohol_involved + collision_day, 
+#              data = alcohol_fatality_data, 
+#              family = "binomial")
+# 
+# model2_summary <- summary(model2)
+# 
+# model2_OR <- exp(cbind(OR = coef(model2), confint(model2)))
+# 
+# model3 <- glm(fatal ~ alcohol_involved * collision_day, 
+#              data = alcohol_fatality_data, 
+#              family = "binomial")
+# 
+# model3_summary <- summary(model3)
+# 
+# model3_OR <- exp(cbind(OR = coef(model3), confint(model3)))
+
+```
+
+Interpretation:
+
+The logistic regression model reveals a statistically significant increase in the likelihood of a fatal collision when alcohol is involved, compared to when it is not. The model's intercept, with a log odds value of -4.98912, indicates the baseline odds of fatality in collisions where alcohol is not involved (Odds Ratio of approximately 0.0068). However, when alcohol is involved, the log odds are positive and the odds ratio increases by a factor of 2.807. Since the p-value is less than 0.001 and the confidence interval of 2.615 to 3.012 does not include 1, this effect is statistically significant.
+
+To control for the day of the week, which could confound the relationship between alcohol and collision fatalities, the variable 'collision_day' was incorporated into the model as a categorical variable with 7 levels and Monday as the reference level. The log odds of a fatal collision vary by day compared to Monday, but only the effect of Saturday and Sundy (coded as 'collision_day6' and 'collision_day7', respectively) showed a statistically significant increase in the odds of fatalities. To be precise, the odds ratio increases by 1.19 on Saturdays and 1.31 on Sundays, compared to Mondays. However, alcohol involvement alone still increases the odds ratio by a factor of 2.71, assuming the collision occurs on a Monday. Changes to the baseline odds are not statistically significant on other days, thus no other conclusions can be made, other than the finding that weekend collisions are more likely to be fatal.
+
+Additionally, we can introduce an interaction term between alcohol involvement and the day of the week. However, none of the interaction terms are significant, indicating that the increase in fatality risk due to alcohol does not vary significantly by day of the week within the given sample. Therefore, the concluded main effects of alcohol involvement and weekend days remain as discussed before.
+
+### Step 4: Visualize Data
+Click the link to see the interactive map of all counties in California: https://samielsabri.shinyapps.io/alcohol_traffic_fatalities/
+
+The bulk of this code is in
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| label: fig-interactive-alcohol-fatalities
+#| fig-cap: "Traffic Accident Fatality Rate in California by Day of Week with Alcohol Involvement Comparison"
+
+
+```
+
+## Section 2: Machine Learning
+
+Using python, I built a machine learning model to predict whether a collision involved fatalities or severe injuries. The outcome is based on the `collision_severity` column. Although the final model performs at over 90% accuracy, I wasmainly interested in refining my approach to feature selection, training, and model validation, as well as best coding practices. 
+
+
+

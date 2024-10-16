@@ -1,0 +1,12 @@
+name: coding-exercise
+title: coding-exercise
+username: samielsabri
+account: samielsabri
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 11858624
+bundleId: 8538706
+url: https://samielsabri.shinyapps.io/coding-exercise/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE

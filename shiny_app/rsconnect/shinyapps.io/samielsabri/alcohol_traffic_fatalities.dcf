@@ -1,0 +1,12 @@
+name: alcohol_traffic_fatalities
+title: alcohol_traffic_fatalities
+username: samielsabri
+account: samielsabri
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 11852789
+bundleId: 9226739
+url: https://samielsabri.shinyapps.io/alcohol_traffic_fatalities/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
