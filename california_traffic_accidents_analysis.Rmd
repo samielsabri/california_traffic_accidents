@@ -209,7 +209,9 @@ The bulk of this code is in
 
 ## Section 2: Machine Learning
 
-Using python, I built a machine learning model to predict whether a collision involved fatalities or severe injuries. The outcome is based on the `collision_severity` column. Although the final model performs at over 90% accuracy, I wasmainly interested in refining my approach to feature selection, training, and model validation, as well as best coding practices. 
+Using python, I built a machine learning model to predict whether a collision involved fatalities or severe injuries. The outcome is based on the `collision_severity` column. Although the final model performs at over 96% accuracy, I was mainly interested in refining my approach to feature selection, training, and model validation, as well as best coding practices. 
+
+The model performs very well on the majority class (non-fatal), but it struggles with the minority class (fatal), as indicated by the lower precision, recall, and F1-score for class 1.
 
 
 
