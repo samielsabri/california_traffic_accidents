@@ -52,5 +52,4 @@ shiny::runApp()
 ```
 
 For more information, view the data dictionary at [TIMS Berkeley](https://tims.berkeley.edu/help/SWITRS.php).
-"""
 
